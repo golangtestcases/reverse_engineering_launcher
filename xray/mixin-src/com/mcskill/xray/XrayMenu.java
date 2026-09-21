@@ -4,15 +4,24 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiScreen;
 
 import org.lwjglx.opengl.GL11;
+import org.lwjglx.input.Mouse;
 
 /**
- * Меню в стиле Material UI. Плоская тёмная карточка, teal-акценты, hover
- * (подсветка строки под мышью, т.к. drawScreen получает mouseX/mouseY),
- * ручной хит-тест по тем же координатам. Две страницы:
- *   MAIN : X-Ray / Fullbright + кнопка Ores
- *   ORES : All ores + список руд (6 на страницу, << >>), BACK
- * Применение мгновенное (RenderState.requestReReRender - пинок дальности
- * прорисовки, как проверено через слайдер RENDER_DISTANCE).
+ * Меню мода: тёмная полупрозрачная карточка, плавные hover-анимации,
+ * категории руд аккордеоном (dropdown), скролл колесом мыши, навигация
+ * стрелками + Enter, кнопка "Применить".
+ *
+ * СТРАНИЦЫ
+ *   MAIN : X-Ray / Fullbright + переход к рудам
+ *   ORES : "Все руды" + категории (Vanilla/Металлы/Самоцветы/Прочее)
+ *          аккордеоном; строка руды: зелёный полупрозрачный = вкл,
+ *          красный полупрозрачный = выкл; внизу кнопка "Применить".
+ *
+ * ПРИМЕНЕНИЕ (важно): клики по рудам меняют ТОЛЬКО State.ores — мир не
+ * перестраивается на каждый клик (меню мгновенно отзывчивое, нет фризов).
+ * Перестроение чанков (RenderState.requestReReRender - пинок дальности +
+ * forcechunk) вызывается один раз: по кнопке "Применить" или автоматически
+ * при закрытии меню с незаписанными изменениями.
  *
  * SRG-имена (рантайм 1.7.10):
  *   GuiScreen.drawScreen   = func_73863_a (IIF)V
@@ -23,54 +32,66 @@ import org.lwjglx.opengl.GL11;
  */
 public final class XrayMenu extends GuiScreen {
 
-    // ---------- палитра ----------
-    private static final float C_BG_R = 0.13f, C_BG_G = 0.14f, C_BG_B = 0.16f, C_BG_A = 0.95f;
-    private static final float C_BORDER_R = 0.09f, C_BORDER_G = 0.10f, C_BORDER_B = 0.11f;
-    private static final float C_ACCENT_R = 0.15f, C_ACCENT_G = 0.65f, C_ACCENT_B = 0.60f;   // teal
-    private static final float C_ACCENT2_R = 0.30f, C_ACCENT2_G = 0.84f, C_ACCENT2_B = 0.77f; // teal light
-    private static final float C_ON_R = 0.15f, C_ON_G = 0.65f, C_ON_B = 0.60f;
-    private static final float C_ON_L_HOVER_R = 0.22f, C_ON_L_HOVER_G = 0.74f, C_ON_L_HOVER_B = 0.67f;
-    private static final float C_OFF_R = 0.21f, C_OFF_G = 0.23f, C_OFF_B = 0.26f;
-    private static final float C_OFF_HOVER_R = 0.27f, C_OFF_HOVER_G = 0.29f, C_OFF_HOVER_B = 0.32f;
-    private static final float C_NAV_R = 0.30f, C_NAV_G = 0.33f, C_NAV_B = 0.40f;
-    private static final float C_NAV_HOVER_R = 0.38f, C_NAV_HOVER_G = 0.42f, C_NAV_HOVER_B = 0.50f;
-    private static final float C_KNOB_ON_R = 0.97f, C_KNOB_ON_G = 0.97f, C_KNOB_ON_B = 0.99f;
-    private static final float C_KNOB_OFF_R = 0.66f, C_KNOB_OFF_G = 0.70f, C_KNOB_OFF_B = 0.74f;
+    // ---------- палитра (тёмная тема) ----------
+    private static final float C_SHADE_A = 0.45f;                    // затемнение мира
+    private static final float C_BG_R = 0.11f, C_BG_G = 0.12f, C_BG_B = 0.15f, C_BG_A = 0.96f;
+    private static final float C_BORDER_R = 0.20f, C_BORDER_G = 0.22f, C_BORDER_B = 0.26f;
+    private static final float C_ACCENT_R = 0.25f, C_ACCENT_G = 0.75f, C_ACCENT_B = 0.70f;   // teal
+    private static final float C_ACCENT2_R = 0.35f, C_ACCENT2_G = 0.88f, C_ACCENT2_B = 0.82f; // teal light
+    private static final float C_GREEN_R = 0.20f, C_GREEN_G = 0.68f, C_GREEN_B = 0.46f;       // руда вкл
+    private static final float C_GREEN_D_R = 0.09f, C_GREEN_D_G = 0.30f, C_GREEN_D_B = 0.20f; // фон вкл
+    private static final float C_RED_R = 0.92f, C_RED_G = 0.33f, C_RED_B = 0.30f;             // руда выкл
+    private static final float C_RED_D_R = 0.38f, C_RED_D_G = 0.12f, C_RED_D_B = 0.12f;       // фон выкл
+    private static final float C_OFF_R = 0.20f, C_OFF_G = 0.22f, C_OFF_B = 0.26f;
+    private static final float C_NAV_R = 0.17f, C_NAV_G = 0.19f, C_NAV_B = 0.23f;
+    private static final float C_NAV_HI_R = 0.24f, C_NAV_HI_G = 0.40f, C_NAV_HI_B = 0.45f;
+    private static final float C_WARN_R = 0.90f, C_WARN_G = 0.72f, C_WARN_B = 0.24f;
+    private static final float C_KNOB_R = 0.97f, C_KNOB_G = 0.97f, C_KNOB_B = 0.99f;
 
     // ---------- layout MAIN ----------
-    private static final int CARD_X = 90;
-    private static final int CARD_Y = 80;
-    private static final int CARD_W = 340;
-    private static final int CARD_H = 250;
-    private static final int TOG_X = CARD_X + 24;
-    private static final int TOG_W = 292;
-    private static final int TOG_H = 36;
-    private static final int TOG1_Y = CARD_Y + 48;
-    private static final int TOG2_Y = TOG1_Y + 52;
-    private static final int TOG3_Y = TOG2_Y + 52;
+    private static final int CARD_X = 80;
+    private static final int CARD_Y = 72;
+    private static final int CARD_W = 380;
+    private static final int CARD_H = 262;
+    private static final int ROW_X = CARD_X + 20;
+    private static final int ROW_W = CARD_W - 40;
+    private static final int ROW_H = 38;
+    private static final int ROW1_Y = CARD_Y + 46;
+    private static final int ROW_STEP = 48;
+    private static final int FOOT1_Y = CARD_Y + CARD_H - 38;
+    private static final int FOOT2_Y = CARD_Y + CARD_H - 22;
 
     // ---------- layout ORES ----------
-    private static final int O2_X = CARD_X + 20;
-    private static final int O2_Y = 56;
-    private static final int O2_W = 380;
-    private static final int O2_H = 390;
-    private static final int ROW_H = 30;
-    private static final int ROW_STEP = 36;
-    private static final int ROWS_PER_PAGE = 6;
-    private static final int ALL_Y = O2_Y + 52;
-    private static final int ROWS_Y = ALL_Y + 42;
-    private static final int NAV_Y = O2_Y + 322;
-    private static final int NAV_H = 30;
-    private static final int NAV_BACK_W = 64;
-    private static final int NAV_PREV_W = 56;
-    private static final int NAV_NEXT_W = 56;
-    private static final int NAV_FOOT_Y = NAV_Y + NAV_H + 12;
+    private static final int O2_X = 60;
+    private static final int O2_Y = 48;
+    private static final int O2_W = 420;
+    private static final int O2_H = 356;
+    private static final int O2_ROW_X = O2_X + 16;
+    private static final int O2_ROW_W = O2_W - 32;
+    private static final int O2_HEAD_H = 26;   // строка-заголовок (категория / all)
+    private static final int O2_ORE_H = 22;    // строка руды
+    private static final int LIST_TOP = O2_Y + 44;
+    private static final int SAVE_Y = O2_Y + O2_H - 44;
+    private static final int SAVE_H = 32;
+    private static final int FOOT_Y = O2_Y + O2_H - 16;
 
-    // ---------- page state ----------
+    // ---------- состояние ----------
     private static boolean orePage = false;
-    private static int orePageIndex = 0;
+    private static final java.util.HashSet<String> expandedCats = new java.util.HashSet<String>();
+    private static boolean allExpanded = false;
+    private static float scroll = 0f;
+    private static boolean dirty = false;
+    private static long openTime = 0L;
+    private static String focusId = null;
+
+    // анимации (живут между кадрами)
+    private static final java.util.HashMap<String, Float> hover = new java.util.HashMap<String, Float>();
+    private static final java.util.HashMap<String, Float> knob = new java.util.HashMap<String, Float>();
 
     public XrayMenu() {
+        openTime = System.currentTimeMillis();
+        State.ensureOreList();
+        dirty = false;
     }
 
     // ---------- draw ----------
@@ -78,138 +99,200 @@ public final class XrayMenu extends GuiScreen {
     @Override
     public void func_73863_a(int mouseX, int mouseY, float partialTicks) {
         super.func_73863_a(mouseX, mouseY, partialTicks);
+        long now = System.currentTimeMillis();
+        float open = smoothstep(Math.min(1f, (now - openTime) / 160f));
+        int slide = (int) ((1f - open) * 14f);
+
+        fillRect(0, 0, 3200, 3200, 0f, 0f, 0f, C_SHADE_A * open);
+
         if (orePage) {
-            drawOrePage(mouseX, mouseY);
+            drawOrePage(mouseX, mouseY, open, slide);
         } else {
-            drawMainPage(mouseX, mouseY);
+            drawMainPage(mouseX, mouseY, open, slide);
         }
+        stepAnimations();
     }
 
-    private void drawMainPage(int mx, int my) {
-        card(CARD_X, CARD_Y, CARD_W, CARD_H);
-        this.func_146279_a("McSkill X-Ray", CARD_X + 16, CARD_Y + 18);
+    // ---------- MAIN ----------
 
-        hoverable(TOG_X, TOG1_Y, TOG_W, TOG_H, State.xray, mx, my,
-                C_ON_R, C_ON_G, C_ON_B, C_ON_L_HOVER_R, C_ON_L_HOVER_G, C_ON_L_HOVER_B);
-        this.func_146279_a("X-Ray", TOG_X + 12, TOG1_Y + TOG_H / 2 - 5);
-        switchKnob(TOG_X, TOG1_Y, TOG_W, TOG_H, State.xray);
+    private void drawMainPage(int mx, int my, float open, int slide) {
+        int y0 = CARD_Y + slide;
+        card(CARD_X, y0, CARD_W, CARD_H, open);
+        this.func_146279_a("McSkill X-Ray", CARD_X + 16, y0 + 16);
 
-        hoverable(TOG_X, TOG2_Y, TOG_W, TOG_H, State.fullbright, mx, my,
-                C_ON_R, C_ON_G, C_ON_B, C_ON_L_HOVER_R, C_ON_L_HOVER_G, C_ON_L_HOVER_B);
-        this.func_146279_a("Fullbright", TOG_X + 12, TOG2_Y + TOG_H / 2 - 5);
-        switchKnob(TOG_X, TOG2_Y, TOG_W, TOG_H, State.fullbright);
+        row(ROW_X, y0 + 46, ROW_W, ROW_H, "X-Ray", State.xray, mx, my, true);
+        row(ROW_X, y0 + 94, ROW_W, ROW_H, "Fullbright", State.fullbright, mx, my, true);
+        row(ROW_X, y0 + 142, ROW_W, ROW_H, "Руды  >", false, mx, my, false);
 
-        // Ores - кнопка-переход
-        hoverable(TOG_X, TOG3_Y, TOG_W, TOG_H, false, mx, my,
-                C_NAV_R, C_NAV_G, C_NAV_B, C_NAV_HOVER_R, C_NAV_HOVER_G, C_NAV_HOVER_B);
-        this.func_146279_a("Ores  >", TOG_X + 12, TOG3_Y + TOG_H / 2 - 5);
-
-        this.func_146279_a("1/2 toggle     B ores     X close", CARD_X + 16, CARD_Y + CARD_H - 40);
-        this.func_146279_a("X - menu", CARD_X + 16, CARD_Y + CARD_H - 22);
+        this.func_146279_a("1 - X-Ray   2 - Fullbright   X - закрыть", CARD_X + 16, FOOT1_Y);
+        this.func_146279_a("Клик по строке - переключить", CARD_X + 16, FOOT2_Y);
     }
 
-    private void drawOrePage(int mx, int my) {
-        card(O2_X, O2_Y, O2_W, O2_H);
+    // ---------- ORES ----------
 
-        String[] keys = State.oreKeys();
-        int pages = Math.max(1, (keys.length + ROWS_PER_PAGE - 1) / ROWS_PER_PAGE);
-        if (orePageIndex >= pages) {
-            orePageIndex = pages - 1;
-        }
-        if (orePageIndex < 0) {
-            orePageIndex = 0;
-        }
+    private void drawOrePage(int mx, int my, float open, int slide) {
+        int y0 = O2_Y + slide;
+        card(O2_X, y0, O2_W, O2_H, open);
+        this.func_146279_a("Руды", O2_X + 16, y0 + 14);
+        this.func_146279_a("ПКМ/Enter - вкл/выкл", O2_X + O2_W - 128, y0 + 14);
+        this.func_146279_a(countStat(), O2_X + O2_W - 60, y0 + 30);
 
-        this.func_146279_a("Ores (" + keys.length + ")", O2_X + 16, O2_Y + 18);
-
-        // ALL - мастер-переключатель
-        boolean allOn = State.allOresEnabled();
-        hoverable(TOG_X, ALL_Y, TOG_W, ROW_H, allOn, mx, my,
-                C_ON_R, C_ON_G, C_ON_B, C_ON_L_HOVER_R, C_ON_L_HOVER_G, C_ON_L_HOVER_B);
-        this.func_146279_a("All ores", TOG_X + 12, ALL_Y + ROW_H / 2 - 5);
-        switchKnob(TOG_X, ALL_Y, TOG_W, ROW_H, allOn);
-        this.func_146279_a(allOn ? "ALL ON" : "ALL OFF", TOG_X + TOG_W - 96, ALL_Y + ROW_H / 2 - 5);
-
-        // строки руд
-        int start = orePageIndex * ROWS_PER_PAGE;
-        int y = ROWS_Y;
-        for (int i = start; i < start + ROWS_PER_PAGE && i < keys.length; i++) {
-            String key = keys[i];
-            boolean on = State.isOreEnabled(key);
-            hoverable(TOG_X, y, TOG_W, ROW_H, on, mx, my,
-                    C_ON_R, C_ON_G, C_ON_B, C_ON_L_HOVER_R, C_ON_L_HOVER_G, C_ON_L_HOVER_B);
-            this.func_146279_a(State.friendlyOreName(key), TOG_X + 12, y + ROW_H / 2 - 5);
-            switchKnob(TOG_X, y, TOG_W, ROW_H, on);
-            y += ROW_STEP;
+        int scrollMax = computeScrollMax();
+        int dw = Mouse.getDWheel();
+        if (dw != 0) {
+            scroll -= Math.signum(dw) * 40f;
+            if (scroll < 0f) {
+                scroll = 0f;
+            }
+            if (scroll > scrollMax) {
+                scroll = scrollMax;
+            }
         }
 
-        // навигация
-        navButton(O2_X + 8, NAV_Y, NAV_BACK_W, NAV_H, "BACK",
-                inRect(mx, my, O2_X + 8, NAV_Y, NAV_BACK_W, NAV_H));
-        navButton(O2_X + O2_W - NAV_BACK_W - NAV_NEXT_W - NAV_PREV_W - 8 - 10, NAV_Y, NAV_PREV_W, NAV_H, "<<",
-                inRect(mx, my, O2_X + O2_W - NAV_BACK_W - NAV_NEXT_W - NAV_PREV_W - 8 - 10, NAV_Y, NAV_PREV_W, NAV_H));
-        navButton(O2_X + O2_W - NAV_BACK_W - NAV_NEXT_W, NAV_Y, NAV_NEXT_W, NAV_H, ">>",
-                inRect(mx, my, O2_X + O2_W - NAV_BACK_W - NAV_NEXT_W, NAV_Y, NAV_NEXT_W, NAV_H));
-        this.func_146279_a("P " + (orePageIndex + 1) + "/" + pages,
-                O2_X + O2_W / 2 - 22, NAV_Y + NAV_H / 2 - 5);
+        int y = LIST_TOP - (int) scroll;
 
-        this.func_146279_a("click - toggle    ESC/X - close", O2_X + 16, NAV_FOOT_Y);
+        // "Все руды"
+        drawOreHeader(y, "row:all", mx, my, "Все руды", State.allOresEnabled(), countOn(), countTotal());
+        y += O2_HEAD_H;
+
+        for (String cat : State.CATEGORIES) {
+            String[] keys = State.oreKeysInCategory(cat);
+            if (keys.length == 0) {
+                continue;
+            }
+            boolean openCat = expandedCats.contains(cat);
+            int[] cc = State.categoryCount(cat);
+            drawOreHeader(y, "cat:" + cat, mx, my, (openCat ? "v " : "> ") + cat, openCat, cc[0], cc[1]);
+            y += O2_HEAD_H;
+            if (openCat) {
+                for (String key : keys) {
+                    drawOreRow(y, key, mx, my);
+                    y += O2_ORE_H;
+                }
+            }
+        }
+
+        drawSaveButton(mx, my);
+
+        this.func_146279_a("стрелки - навигация, B - назад, A - все категории", O2_X + 16, FOOT_Y);
+    }
+
+    private int computeScrollMax() {
+        int contentH = O2_HEAD_H; // "Все руды"
+        for (String cat : State.CATEGORIES) {
+            String[] keys = State.oreKeysInCategory(cat);
+            if (keys.length == 0) {
+                continue;
+            }
+            contentH += O2_HEAD_H;
+            if (expandedCats.contains(cat)) {
+                contentH += keys.length * O2_ORE_H;
+            }
+        }
+        int viewportH = SAVE_Y - 8 - LIST_TOP;
+        return Math.max(0, contentH - viewportH);
+    }
+
+    private void drawOreHeader(int y, String id, int mx, int my, String label, boolean on, int onN, int totalN) {
+        boolean hov = inRect(mx, my, O2_ROW_X, y, O2_ROW_W, O2_HEAD_H);
+        float p = anim(hover, id, hov ? 1f : 0f);
+        float r = lerp(C_NAV_R, C_NAV_HI_R, p);
+        float g = lerp(C_NAV_G, C_NAV_HI_G, p);
+        float b = lerp(C_NAV_B, C_NAV_HI_B, p);
+        fillRect(O2_ROW_X, y, O2_ROW_W, O2_HEAD_H, r, g, b, 0.92f);
+        fillRect(O2_ROW_X, y + O2_HEAD_H - 1, O2_ROW_W, 1, C_BORDER_R, C_BORDER_G, C_BORDER_B, 0.9f);
+        this.func_146279_a(label + "   " + onN + "/" + totalN, O2_ROW_X + 10, y + O2_HEAD_H / 2 - 4);
+    }
+
+    /** Строка руды: зелёный полупрозрачный = вкл, красный полупрозрачный = выкл. */
+    private void drawOreRow(int y, String key, int mx, int my) {
+        boolean on = State.isOreEnabled(key);
+        String id = "ore:" + key;
+        boolean hov = inRect(mx, my, O2_ROW_X, y, O2_ROW_W, O2_ORE_H);
+        float p = anim(hover, id, hov ? 1f : 0f);
+        float r = lerp(on ? C_GREEN_D_R : C_RED_D_R, on ? C_GREEN_R : C_RED_R, p);
+        float g = lerp(on ? C_GREEN_D_G : C_RED_D_G, on ? C_GREEN_G : C_RED_G, p);
+        float b = lerp(on ? C_GREEN_D_B : C_RED_D_B, on ? C_GREEN_B : C_RED_B, p);
+        fillRect(O2_ROW_X, y, O2_ROW_W, O2_ORE_H, r, g, b, 0.55f);
+        // индикатор слева
+        float ir = on ? C_GREEN_R : C_RED_R;
+        float ig = on ? C_GREEN_G : C_RED_G;
+        float ib = on ? C_GREEN_B : C_RED_B;
+        fillRect(O2_ROW_X, y, 4, O2_ORE_H, ir, ig, ib, on ? 0.9f : 0.95f);
+        String mark = on ? "+" : "-";
+        this.func_146279_a(mark + " " + State.friendlyOreNameRu(key), O2_ROW_X + 12, y + O2_ORE_H / 2 - 4);
+    }
+
+    private void drawSaveButton(int mx, int my) {
+        int x = O2_X + 16;
+        int y = SAVE_Y;
+        int w = O2_W - 32;
+        boolean hov = inRect(mx, my, x, y, w, SAVE_H);
+        float p = anim(hover, "row:save", hov ? 1f : 0f);
+        if (dirty) {
+            float r = lerp(C_WARN_R * 0.55f, C_WARN_R, p);
+            float g = lerp(C_WARN_G * 0.55f, C_WARN_G, p);
+            float b = lerp(C_WARN_B * 0.55f, C_WARN_B, p);
+            fillRect(x, y, w, SAVE_H, r, g, b, 0.94f);
+            this.func_146279_a("Применить изменения  (чанки перестроятся)", x + 14, y + SAVE_H / 2 - 4);
+        } else {
+            float r = lerp(C_OFF_R, C_OFF_R + 0.12f, p);
+            float g = lerp(C_OFF_G, C_OFF_G + 0.12f, p);
+            float b = lerp(C_OFF_B, C_OFF_B + 0.12f, p);
+            fillRect(x, y, w, SAVE_H, r, g, b, 0.94f);
+            this.func_146279_a("Всё применено", x + 14, y + SAVE_H / 2 - 4);
+        }
     }
 
     // ---------- primitives ----------
 
-    private static void card(int x, int y, int w, int h) {
-        // тень (слой потемнее, чуть сдвинут)
-        fillRect(x - 2, y - 2, w + 4, h + 4, C_BORDER_R, C_BORDER_G, C_BORDER_B, 0.55f);
-        // фон
-        fillRect(x, y, w, h, C_BG_R, C_BG_G, C_BG_B, C_BG_A);
-        // акцентная полоса
-        fillRect(x, y, w, 5, C_ACCENT2_R, C_ACCENT2_G, C_ACCENT2_B, 1.0f);
+    private static void card(int x, int y, int w, int h, float open) {
+        fillRect(x - 3, y - 3, w + 6, h + 6, 0f, 0f, 0f, 0.45f * open);
+        fillRect(x, y, w, h, C_BG_R, C_BG_G, C_BG_B, C_BG_A * open);
+        fillRect(x, y, w, 1, C_BORDER_R + 0.1f, C_BORDER_G + 0.1f, C_BORDER_B + 0.1f, open);
+        fillRect(x, y + h - 1, w, 1, C_BORDER_R, C_BORDER_G, C_BORDER_B, open);
+        fillRect(x, y, 1, h, C_BORDER_R, C_BORDER_G, C_BORDER_B, open);
+        fillRect(x + w - 1, y, 1, h, C_BORDER_R, C_BORDER_G, C_BORDER_B, open);
+        fillRect(x, y, w, 4, C_ACCENT2_R, C_ACCENT2_G, C_ACCENT2_B, open);
+        fillRect(x + 12, y + 30, w - 24, 1, C_BORDER_R, C_BORDER_G, C_BORDER_B, 0.8f * open);
     }
 
-    /** Пилюля-строка с hover-состоянием. */
-    private static void hoverable(int x, int y, int w, int h, boolean on, int mx, int my,
-                                  float onR, float onG, float onB,
-                                  float onHoverR, float onHoverG, float onHoverB) {
-        boolean hover = inRect(mx, my, x, y, w, h);
-        if (on) {
-            if (hover) {
-                fillRect(x, y, w, h, onHoverR, onHoverG, onHoverB, 0.94f);
-            } else {
-                fillRect(x, y, w, h, onR, onG, onB, 0.94f);
-            }
-        } else {
-            if (hover) {
-                fillRect(x, y, w, h, C_OFF_HOVER_R, C_OFF_HOVER_G, C_OFF_HOVER_B, 0.94f);
-            } else {
-                fillRect(x, y, w, h, C_OFF_R, C_OFF_G, C_OFF_B, 0.94f);
-            }
-        }
-        // разделитель снизу
+    /** Универсальная строка: тумблер или кнопка. */
+    private void row(int x, int y, int w, int h, String label, boolean on, int mx, int my, boolean withSwitch) {
+        String id = "row:" + label;
+        boolean hov = inRect(mx, my, x, y, w, h);
+        float p = anim(hover, id, hov ? 1f : 0f);
+        float r = lerp(C_OFF_R, C_OFF_R + 0.12f, p);
+        float g = lerp(C_OFF_G, C_OFF_G + 0.14f, p);
+        float b = lerp(C_OFF_B, C_OFF_B + 0.16f, p);
+        fillRect(x, y, w, h, r, g, b, 0.94f);
         fillRect(x, y + h - 1, w, 1, C_BORDER_R, C_BORDER_G, C_BORDER_B, 0.9f);
-    }
-
-    private static void navButton(int x, int y, int w, int h, String text, boolean hover) {
-        if (hover) {
-            fillRect(x, y, w, h, C_NAV_HOVER_R, C_NAV_HOVER_G, C_NAV_HOVER_B, 0.95f);
+        this.func_146279_a(label, x + 12, y + h / 2 - 5);
+        if (withSwitch) {
+            switchKnob(x, y, w, h, on);
         } else {
-            fillRect(x, y, w, h, C_NAV_R, C_NAV_G, C_NAV_B, 0.95f);
+            this.func_146279_a(">", x + w - 22, y + h / 2 - 5);
         }
     }
 
-    /** Переключатель вправо: трек + ручка. */
+    /** Переключатель вправо: трек + ручка (ручка едет плавно). */
     private static void switchKnob(int x, int y, int w, int h, boolean on) {
-        int sw = 22;
-        int kn = 14;
+        float target = on ? 1f : 0f;
+        String id = "knob:" + x + ":" + y;
+        Float cur = knob.get(id);
+        float p = cur == null ? target : cur.floatValue();
+        p += (target - p) * 0.32f;
+        knob.put(id, p);
+        int sw = 24;
+        int kn = 12;
         int trackX = x + w - sw - 10;
-        int trackY = y + (h - 10) / 2;
-        if (on) {
-            fillRect(trackX, trackY, sw, 10, C_ACCENT_R, C_ACCENT_G, C_ACCENT_B, 1.0f);
-            fillRect(trackX + sw - kn, trackY - 2, kn, 14, C_KNOB_ON_R, C_KNOB_ON_G, C_KNOB_ON_B, 1.0f);
-        } else {
-            fillRect(trackX, trackY, sw, 10, 0.42f, 0.45f, 0.50f, 1.0f);
-            fillRect(trackX, trackY - 2, kn, 14, C_KNOB_OFF_R, C_KNOB_OFF_G, C_KNOB_OFF_B, 1.0f);
-        }
+        int trackY = y + (h - 8) / 2;
+        float r = lerp(0.45f, C_ACCENT_R, p);
+        float g = lerp(0.48f, C_ACCENT_G, p);
+        float b = lerp(0.52f, C_ACCENT_B, p);
+        fillRect(trackX, trackY, sw, 8, r, g, b, 1f);
+        int off = (int) (p * (sw - kn));
+        fillRect(trackX + off, trackY - 2, kn, 12, C_KNOB_R, C_KNOB_G, C_KNOB_B, 1f);
     }
 
     /** Плоский прямоугольник (квад). Вызывается только из drawScreen. */
@@ -225,6 +308,63 @@ public final class XrayMenu extends GuiScreen {
 
     private static boolean inRect(int mx, int my, int x, int y, int w, int h) {
         return mx >= x && my >= y && mx < x + w && my < y + h;
+    }
+
+    // ---------- анимации ----------
+
+    private static float anim(java.util.HashMap<String, Float> map, String id, float target) {
+        Float cur = map.get(id);
+        float v;
+        if (cur == null) {
+            v = target;
+            map.put(id, Float.valueOf(v));
+            return v;
+        }
+        v = cur.floatValue();
+        v += (target - v) * 0.32f;
+        if (Math.abs(target - v) < 0.004f) {
+            v = target;
+        }
+        map.put(id, Float.valueOf(v));
+        return v;
+    }
+
+    /** Чистка устаревших анимационных ключей. */
+    private static void stepAnimations() {
+        if (hover.size() > 600) {
+            hover.clear();
+        }
+        if (knob.size() > 200) {
+            knob.clear();
+        }
+    }
+
+    private static float smoothstep(float t) {
+        return t * t * (3f - 2f * t);
+    }
+
+    private static float lerp(float a, float b, float t) {
+        return a + (b - a) * t;
+    }
+
+    // ---------- статистика ----------
+
+    private static int countOn() {
+        int n = 0;
+        for (String k : State.ores.keySet()) {
+            if (State.isOreEnabled(k)) {
+                n++;
+            }
+        }
+        return n;
+    }
+
+    private static int countTotal() {
+        return State.ores.size();
+    }
+
+    private static String countStat() {
+        return countOn() + "/" + countTotal() + " вкл";
     }
 
     // ---------- input ----------
@@ -253,20 +393,46 @@ public final class XrayMenu extends GuiScreen {
             }
             return;
         }
+        if (keyChar == 'a' || keyChar == 'A') { // A - все категории
+            allExpanded = !allExpanded;
+            expandedCats.clear();
+            if (allExpanded) {
+                for (String cat : State.CATEGORIES) {
+                    if (State.categoryHasOres(cat)) {
+                        expandedCats.add(cat);
+                    }
+                }
+            }
+            return;
+        }
+        if (keyChar == 0) {
+            if (keyCode == 200) { // UP
+                moveCursor(-1);
+                return;
+            }
+            if (keyCode == 208) { // DOWN
+                moveCursor(1);
+                return;
+            }
+            if (keyCode == 28 || keyCode == 57) { // Enter / Space
+                activateCursor();
+                return;
+            }
+        }
         super.func_73869_a(keyChar, keyCode);
     }
 
     @Override
     protected void func_146273_a(int mouseX, int mouseY, int mouseButton, long param) {
-        if (mouseButton == 0) {
+        if (mouseButton == 0 || (mouseButton == 1 && orePage)) {
             if (orePage) {
                 handleOreClick(mouseX, mouseY);
             } else {
-                if (inRect(mouseX, mouseY, TOG_X, TOG1_Y, TOG_W, TOG_H)) {
+                if (inRect(mouseX, mouseY, ROW_X, CARD_Y + 46, ROW_W, ROW_H)) {
                     toggleXray();
-                } else if (inRect(mouseX, mouseY, TOG_X, TOG2_Y, TOG_W, TOG_H)) {
+                } else if (inRect(mouseX, mouseY, ROW_X, CARD_Y + 94, ROW_W, ROW_H)) {
                     toggleFullbright();
-                } else if (inRect(mouseX, mouseY, TOG_X, TOG3_Y, TOG_W, TOG_H)) {
+                } else if (inRect(mouseX, mouseY, ROW_X, CARD_Y + 142, ROW_W, ROW_H)) {
                     openOres();
                 }
             }
@@ -275,43 +441,115 @@ public final class XrayMenu extends GuiScreen {
     }
 
     private void handleOreClick(int mx, int my) {
-        if (inRect(mx, my, TOG_X, ALL_Y, TOG_W, ROW_H)) {
+        int y = LIST_TOP - (int) scroll;
+
+        if (inRect(mx, my, O2_ROW_X, y, O2_ROW_W, O2_HEAD_H)) {
             State.toggleAllOres();
-            RenderState.requestReReRender();
+            dirty = true;
             return;
         }
-        String[] keys = State.oreKeys();
-        int pages = Math.max(1, (keys.length + ROWS_PER_PAGE - 1) / ROWS_PER_PAGE);
-        int start = orePageIndex * ROWS_PER_PAGE;
-        int y = ROWS_Y;
-        for (int i = start; i < start + ROWS_PER_PAGE && i < keys.length; i++) {
-            if (inRect(mx, my, TOG_X, y, TOG_W, ROW_H)) {
-                String key = keys[i];
-                State.setOreEnabled(key, !State.isOreEnabled(key));
-                RenderState.requestReReRender();
+        y += O2_HEAD_H;
+
+        for (String cat : State.CATEGORIES) {
+            String[] keys = State.oreKeysInCategory(cat);
+            if (keys.length == 0) {
+                continue;
+            }
+            if (inRect(mx, my, O2_ROW_X, y, O2_ROW_W, O2_HEAD_H)) {
+                if (expandedCats.contains(cat)) {
+                    expandedCats.remove(cat);
+                } else {
+                    expandedCats.add(cat);
+                }
                 return;
             }
-            y += ROW_STEP;
+            y += O2_HEAD_H;
+            if (expandedCats.contains(cat)) {
+                for (String key : keys) {
+                    if (inRect(mx, my, O2_ROW_X, y, O2_ROW_W, O2_ORE_H)) {
+                        State.setOreEnabled(key, !State.isOreEnabled(key));
+                        dirty = true;
+                        return;
+                    }
+                    y += O2_ORE_H;
+                }
+            }
         }
-        // навигация
-        int prevX = O2_X + O2_W - NAV_BACK_W - NAV_NEXT_W - NAV_PREV_W - 18;
-        int nextX = O2_X + O2_W - NAV_BACK_W - NAV_NEXT_W;
-        if (inRect(mx, my, O2_X + 8, NAV_Y, NAV_BACK_W, NAV_H)) {
-            orePage = false;
-        } else if (inRect(mx, my, prevX, NAV_Y, NAV_PREV_W, NAV_H)) {
-            if (orePageIndex > 0) {
-                orePageIndex--;
-            }
-        } else if (inRect(mx, my, nextX, NAV_Y, NAV_NEXT_W, NAV_H)) {
-            if (orePageIndex + 1 < pages) {
-                orePageIndex++;
-            }
+
+        if (inRect(mx, my, O2_X + 16, SAVE_Y, O2_W - 32, SAVE_H)) {
+            applyChanges();
         }
     }
 
-    @Override
-    public boolean func_73868_f() {
-        return false; // не ставить игру на паузу
+    /** Перестроение чанков - один раз, по явной команде. */
+    private static void applyChanges() {
+        dirty = false;
+        RenderState.requestReReRender();
+    }
+
+    // ---------- курсор (клавиатура) ----------
+
+    private static java.util.ArrayList<String> focusList() {
+        java.util.ArrayList<String> list = new java.util.ArrayList<String>();
+        list.add("row:all");
+        for (String cat : State.CATEGORIES) {
+            String[] keys = State.oreKeysInCategory(cat);
+            if (keys.length == 0) {
+                continue;
+            }
+            list.add("cat:" + cat);
+            if (expandedCats.contains(cat)) {
+                for (String key : keys) {
+                    list.add("ore:" + key);
+                }
+            }
+        }
+        return list;
+    }
+
+    private static void moveCursor(int delta) {
+        java.util.ArrayList<String> list = focusList();
+        if (list.isEmpty()) {
+            return;
+        }
+        int idx = list.indexOf(focusId);
+        if (idx < 0) {
+            idx = 0;
+        }
+        idx += delta;
+        if (idx < 0) {
+            idx = list.size() - 1;
+        }
+        if (idx >= list.size()) {
+            idx = 0;
+        }
+        focusId = list.get(idx);
+    }
+
+    private static void activateCursor() {
+        String id = focusId;
+        if (id == null) {
+            return;
+        }
+        if (id.equals("row:all")) {
+            State.toggleAllOres();
+            dirty = true;
+            return;
+        }
+        if (id.startsWith("cat:")) {
+            String cat = id.substring(4);
+            if (expandedCats.contains(cat)) {
+                expandedCats.remove(cat);
+            } else {
+                expandedCats.add(cat);
+            }
+            return;
+        }
+        if (id.startsWith("ore:")) {
+            String key = id.substring(4);
+            State.setOreEnabled(key, !State.isOreEnabled(key));
+            dirty = true;
+        }
     }
 
     // ---------- state ----------
@@ -329,11 +567,19 @@ public final class XrayMenu extends GuiScreen {
     private static void openOres() {
         State.ensureOreList();
         orePage = true;
-        orePageIndex = 0;
+        dirty = false;
     }
 
     private void close() {
+        if (dirty) {
+            applyChanges();
+        }
         State.menuOpen = false;
         Minecraft.func_71410_x().func_147108_a(null);
+    }
+
+    @Override
+    public boolean func_73868_f() {
+        return false; // не ставить игру на паузу
     }
 }
