@@ -1,0 +1,12 @@
+# Артефакты сборки (пересобираются build.cmd)
+build/*
+!build/res/
+!build/res/mcmod.info
+
+# Компилированное
+*.class
+
+# IDE
+.idea/
+.vscode/
+*.iml
