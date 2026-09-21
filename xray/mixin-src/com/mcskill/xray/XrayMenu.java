@@ -120,9 +120,9 @@ public final class XrayMenu extends GuiScreen {
         card(CARD_X, y0, CARD_W, CARD_H, open);
         this.func_146279_a("McSkill X-Ray", CARD_X + 16, y0 + 16);
 
-        row(ROW_X, y0 + 46, ROW_W, ROW_H, "X-Ray", State.xray, mx, my, true);
-        row(ROW_X, y0 + 94, ROW_W, ROW_H, "Fullbright", State.fullbright, mx, my, true);
-        row(ROW_X, y0 + 142, ROW_W, ROW_H, "Руды  >", false, mx, my, false);
+        row(ROW_X, y0 + 46, ROW_W, ROW_H, "m:xray", "X-Ray", State.xray, mx, my, true);
+        row(ROW_X, y0 + 94, ROW_W, ROW_H, "m:fb", "Fullbright", State.fullbright, mx, my, true);
+        row(ROW_X, y0 + 142, ROW_W, ROW_H, "m:ores", "Руды  >", false, mx, my, false);
 
         this.func_146279_a("1 - X-Ray   2 - Fullbright   X - закрыть", CARD_X + 16, FOOT1_Y);
         this.func_146279_a("Клик по строке - переключить", CARD_X + 16, FOOT2_Y);
@@ -201,6 +201,10 @@ public final class XrayMenu extends GuiScreen {
         float b = lerp(C_NAV_B, C_NAV_HI_B, p);
         fillRect(O2_ROW_X, y, O2_ROW_W, O2_HEAD_H, r, g, b, 0.92f);
         fillRect(O2_ROW_X, y + O2_HEAD_H - 1, O2_ROW_W, 1, C_BORDER_R, C_BORDER_G, C_BORDER_B, 0.9f);
+        if (id.equals(focusId)) {
+            fillRect(O2_ROW_X, y, O2_ROW_W, 2, C_ACCENT2_R, C_ACCENT2_G, C_ACCENT2_B, 1f);
+            fillRect(O2_ROW_X, y, 2, O2_HEAD_H, C_ACCENT2_R, C_ACCENT2_G, C_ACCENT2_B, 1f);
+        }
         this.func_146279_a(label + "   " + onN + "/" + totalN, O2_ROW_X + 10, y + O2_HEAD_H / 2 - 4);
     }
 
@@ -219,6 +223,10 @@ public final class XrayMenu extends GuiScreen {
         float ig = on ? C_GREEN_G : C_RED_G;
         float ib = on ? C_GREEN_B : C_RED_B;
         fillRect(O2_ROW_X, y, 4, O2_ORE_H, ir, ig, ib, on ? 0.9f : 0.95f);
+        if (id.equals(focusId)) {
+            fillRect(O2_ROW_X, y, O2_ROW_W, 2, C_ACCENT2_R, C_ACCENT2_G, C_ACCENT2_B, 1f);
+            fillRect(O2_ROW_X + O2_ROW_W - 2, y, 2, O2_ORE_H, C_ACCENT2_R, C_ACCENT2_G, C_ACCENT2_B, 1f);
+        }
         String mark = on ? "+" : "-";
         this.func_146279_a(mark + " " + State.friendlyOreNameRu(key), O2_ROW_X + 12, y + O2_ORE_H / 2 - 4);
     }
@@ -258,8 +266,7 @@ public final class XrayMenu extends GuiScreen {
     }
 
     /** Универсальная строка: тумблер или кнопка. */
-    private void row(int x, int y, int w, int h, String label, boolean on, int mx, int my, boolean withSwitch) {
-        String id = "row:" + label;
+    private void row(int x, int y, int w, int h, String id, String label, boolean on, int mx, int my, boolean withSwitch) {
         boolean hov = inRect(mx, my, x, y, w, h);
         float p = anim(hover, id, hov ? 1f : 0f);
         float r = lerp(C_OFF_R, C_OFF_R + 0.12f, p);
@@ -267,6 +274,10 @@ public final class XrayMenu extends GuiScreen {
         float b = lerp(C_OFF_B, C_OFF_B + 0.16f, p);
         fillRect(x, y, w, h, r, g, b, 0.94f);
         fillRect(x, y + h - 1, w, 1, C_BORDER_R, C_BORDER_G, C_BORDER_B, 0.9f);
+        if (id.equals(focusId)) {
+            fillRect(x, y, w, 2, C_ACCENT2_R, C_ACCENT2_G, C_ACCENT2_B, 1f);
+            fillRect(x, y, 3, h, C_ACCENT2_R, C_ACCENT2_G, C_ACCENT2_B, 1f);
+        }
         this.func_146279_a(label, x + 12, y + h / 2 - 5);
         if (withSwitch) {
             switchKnob(x, y, w, h, on);
@@ -489,8 +500,15 @@ public final class XrayMenu extends GuiScreen {
 
     // ---------- курсор (клавиатура) ----------
 
+    /** Плоский список интерактивных id текущей страницы. */
     private static java.util.ArrayList<String> focusList() {
         java.util.ArrayList<String> list = new java.util.ArrayList<String>();
+        if (!orePage) {
+            list.add("m:xray");
+            list.add("m:fb");
+            list.add("m:ores");
+            return list;
+        }
         list.add("row:all");
         for (String cat : State.CATEGORIES) {
             String[] keys = State.oreKeysInCategory(cat);
@@ -529,6 +547,18 @@ public final class XrayMenu extends GuiScreen {
     private static void activateCursor() {
         String id = focusId;
         if (id == null) {
+            return;
+        }
+        if (id.equals("m:xray")) {
+            toggleXray();
+            return;
+        }
+        if (id.equals("m:fb")) {
+            toggleFullbright();
+            return;
+        }
+        if (id.equals("m:ores")) {
+            openOres();
             return;
         }
         if (id.equals("row:all")) {
