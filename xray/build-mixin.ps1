@@ -73,7 +73,10 @@ Write-Host '[3/4] jar cfm ...'
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 Write-Host '[4/4] deploy to client mods ...'
-if (Test-Path $target) { Copy-Item $target "$target.bak" -Force }
+if (Test-Path $target) {
+    $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
+    Copy-Item $target "$target.bak-$stamp" -Force
+}
 Copy-Item $built $target -Force
 
 Write-Host ''
